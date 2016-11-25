@@ -7,7 +7,10 @@ using System.Web.Http;
 using System.Web.Http.Description;
 using Microsoft.Bot.Connector;
 using Microsoft.Bot.Builder.Dialogs;
+using Microsoft.Bot.Builder.Luis;
+using Microsoft.Bot.Builder.Luis.Models;
 using Newtonsoft.Json;
+using System.Collections.Generic;
 
 namespace bot_fw_csharp
 {
@@ -22,30 +25,13 @@ namespace bot_fw_csharp
         {
             if (activity != null && activity.GetActivityType() == ActivityTypes.Message)
             {
-                await Conversation.SendAsync(activity, () => new EchoDialog());
+                await Conversation.SendAsync(activity, () => new SampleLuisDialog());
             }
             else
             {
                 HandleSystemMessage(activity);
             }
             return new HttpResponseMessage(System.Net.HttpStatusCode.Accepted);
-
-            //if (activity.Type == ActivityTypes.Message)
-            //{
-            //    ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
-            //    // calculate something for us to return
-            //    int length = (activity.Text ?? string.Empty).Length;
-
-            //    // return our reply to the user
-            //    Activity reply = activity.CreateReply($"You sent {activity.Text} which was {length} characters");
-            //    await connector.Conversations.ReplyToActivityAsync(reply);
-            //}
-            //else
-            //{
-            //    HandleSystemMessage(activity);
-            //}
-            //var response = Request.CreateResponse(HttpStatusCode.OK);
-            //return response;
         }
 
         [Serializable]
@@ -92,6 +78,78 @@ namespace bot_fw_csharp
                 }
                 context.Wait(MessageReceivedAsync);
             }
+        }
+
+        [LuisModel("0dbfcffa-372e-4f8a-8eef-097e8e35eaa5", "c06e2e79ee13450399babf09b94dfa8e")]
+        [Serializable]
+        public class SampleLuisDialog : LuisDialog<object>
+        {
+            public const string DefaultAlarmWhat = "default";
+            public const string Entity_Area = "area";
+            public const string Entity_Gourmet_Category = "gourmetCategory";
+            protected string _area;
+            protected string _gourmetCategory;
+
+            [LuisIntent("")]
+            public async Task None(IDialogContext context, LuisResult result)
+            {
+                string message = $"わかりません: " + string.Join(", ", result.Intents.Select(i => i.Intent));
+                await context.PostAsync(message);
+                context.Wait(MessageReceived);
+            }
+
+            //[LuisIntent("builtin.intent.getRestaurant")]
+            [LuisIntent("getRestaurant")]
+            public async Task GetRestaurant(IDialogContext context, LuisResult result)
+            {
+                EntityRecommendation area, gourmetCategory;
+                bool isAreaExist = result.TryFindEntity(Entity_Area, out area);
+                bool isCategoryExist = result.TryFindEntity(Entity_Gourmet_Category, out gourmetCategory);
+                if (!isAreaExist && !isCategoryExist)
+                {
+                    string message = $"ごめんなさい、情報が足りません";
+                    await context.PostAsync(message);
+                    context.Wait(MessageReceived);
+                }
+                else if (!isAreaExist)
+                {
+                    _gourmetCategory = gourmetCategory.Entity;
+                    PromptDialog.Text(context, ReplyRestaurantAsync, "探したい都道府県を教えてください", "都道府県の名前で教えてください", 3);
+                }
+                else if (!isCategoryExist)
+                {
+                    _area = area.Entity;
+                    PromptDialog.Text(context, ReplyRestaurantAsync, "探したいレストランのジャンルを教えてください", "「イタリアン」などの名前で教えてください", 3);
+                }
+                else
+                {
+                    _area = area.Entity;
+                    _gourmetCategory = gourmetCategory.Entity;
+                    await ReplyRestaurantAsync(context);
+                }
+            }
+
+            public async Task ReplyRestaurantAsync(IDialogContext context)
+            {
+                string message = $"{_area}の{_gourmetCategory}を探しますね";
+                await context.PostAsync(message);
+                _area = null;
+                _gourmetCategory = null;
+                context.Wait(MessageReceived);
+            }
+
+            public async Task ReplyRestaurantAsync(IDialogContext context, IAwaitable<string> argument)
+            {
+                var area = _area ?? await argument;
+                var category = _gourmetCategory ?? await argument;
+                string message = $"{area}の{category}を探しますね";
+                await context.PostAsync(message);
+                _area = null;
+                _gourmetCategory = null;
+                context.Wait(MessageReceived);
+            }
+
+
         }
 
         private Activity HandleSystemMessage(Activity message)
